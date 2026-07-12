@@ -2,6 +2,7 @@ package com.example.backend.controller;
 
 
 import com.example.backend.dto.DailyMixResponse;
+import com.example.backend.dto.IntervalDto;
 import com.example.backend.dto.OptimalWindowDto;
 import com.example.backend.service.EnergyMixService;
 import lombok.RequiredArgsConstructor;
@@ -27,5 +28,13 @@ public class EnergyMixController {
     public ResponseEntity<OptimalWindowDto> getOptimalWindow(@PathVariable int hours) {
         OptimalWindowDto optimalWindowDto = energyMixService.calculateOptimalWindow(hours);
         return ResponseEntity.ok(optimalWindowDto);
+    }
+
+    @GetMapping("/generation/raw")
+    public ResponseEntity<List<IntervalDto>> getGenerationRaw() {
+
+
+
+        return ResponseEntity.ok(energyMixService.getGenerationForNDays(3));
     }
 }

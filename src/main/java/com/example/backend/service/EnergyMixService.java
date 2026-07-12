@@ -11,6 +11,9 @@ import java.time.format.DateTimeFormatter;
 import java.util.*;
 import java.util.stream.Collectors;
 
+import java.time.ZoneId;
+import java.time.ZonedDateTime;
+
 @Service
 public class EnergyMixService {
 
@@ -19,38 +22,64 @@ public class EnergyMixService {
     public EnergyMixService(RestTemplate restTemplate){
         this.restTemplate = restTemplate;
     }
-    public List<IntervalDto> getGeneration(OffsetDateTime from, OffsetDateTime to){
-        String fromStr = DateTimeFormatter.ISO_INSTANT.format(from.toInstant());
-        String toStr = DateTimeFormatter.ISO_INSTANT.format(to.toInstant());
+    public List<IntervalDto> getGeneration(OffsetDateTime from, OffsetDateTime to) {
+        ZoneId ukZone = ZoneId.of("Europe/London");
+
+        String fromStr = from.atZoneSameInstant(ukZone)
+                .format(DateTimeFormatter.ISO_OFFSET_DATE_TIME);
+
+        String toStr = to.atZoneSameInstant(ukZone)
+                .format(DateTimeFormatter.ISO_OFFSET_DATE_TIME);
 
         String url = UriComponentsBuilder.fromUriString("https://api.carbonintensity.org.uk/generation")
                 .pathSegment(fromStr, toStr)
                 .toUriString();
 
-        try{
+        try {
             EnergyMixDto energyMixDto = restTemplate.getForObject(url, EnergyMixDto.class);
 
-            if(energyMixDto != null && energyMixDto.getData() != null){
+            if (energyMixDto != null && energyMixDto.getData() != null) {
                 return energyMixDto.getData();
             }
-        }catch(Exception e){
+        } catch (Exception e) {
             System.err.println("Błąd podczas pobierania danych z API: " + e.getMessage());
         }
+
         return Collections.emptyList();
     }
 
-    public List<IntervalDto> getGenerationForNDays(int Days){
-        OffsetDateTime from = OffsetDateTime.now();
-        OffsetDateTime to = OffsetDateTime.now().plusDays(Days);
+    public List<IntervalDto> getGenerationForNDays(int days) {
+        ZoneId ukZone = ZoneId.of("Europe/London");
+
+        ZonedDateTime nowUk = ZonedDateTime.now(ukZone);
+
+        OffsetDateTime from = nowUk.toLocalDate()
+                .atStartOfDay(ukZone)
+                .toOffsetDateTime();
+
+        OffsetDateTime to = from.plusDays(days);
+
         return getGeneration(from, to);
     }
 
     public List<DailyMixResponse> getThreeDaysAverages() {
         List<IntervalDto> rawIntervals = getGenerationForNDays(3);
 
+        ZoneId ukZone = ZoneId.of("Europe/London");
+
+        LocalDate todayUk = LocalDate.now(ukZone);
+
         Map<LocalDate, List<IntervalDto>> groupedByDay = rawIntervals.stream()
                 .filter(i -> i.getFrom() != null && i.getGenerationmix() != null)
-                .collect(Collectors.groupingBy(i -> i.getFrom().toLocalDate()));
+                .filter(i -> !i.getFrom()
+                        .atZoneSameInstant(ukZone)
+                        .toLocalDate()
+                        .isBefore(todayUk))
+                .collect(Collectors.groupingBy(
+                        i -> i.getFrom()
+                                .atZoneSameInstant(ukZone)
+                                .toLocalDate()
+                ));
 
         List<DailyMixResponse> finalResult = new ArrayList<>();
 
@@ -110,41 +139,46 @@ public class EnergyMixService {
         return Math.round(average * 100.0) / 100.0;
     }
 
+    public List<IntervalDto> getGenerationForNext48Hours() {
+        ZoneId ukZone = ZoneId.of("Europe/London");
+
+        OffsetDateTime from = ZonedDateTime.now(ukZone)
+                .toOffsetDateTime();
+
+        OffsetDateTime to = from.plusDays(2);
+
+        return getGeneration(from, to);
+    }
+
     public OptimalWindowDto calculateOptimalWindow(int hours) {
         if (hours < 1 || hours > 6) {
             throw new IllegalArgumentException("Długość okna musi być między 1 a 6 godzin.");
         }
-        List<IntervalDto> generationForTwoDays = getGenerationForNDays(2);
+
+        List<IntervalDto> intervals = getGenerationForNext48Hours();
 
         int windowSize = hours * 2;
 
-        double maxCleanEnergy = -1.0;
+        double maxCleanEnergy = -1;
         OffsetDateTime bestFrom = null;
         OffsetDateTime bestTo = null;
 
-        List<IntervalDto> intervals = new ArrayList<>();
+        for (int i = 0; i <= intervals.size() - windowSize; i++) {
 
-        for(int i =0; i < windowSize ; i++){
-            intervals.add(generationForTwoDays.get(i));
-        }
+            List<IntervalDto> window = intervals.subList(i, i + windowSize);
 
-        for(int i = windowSize; i < generationForTwoDays.size(); i++){
-            double avg = calculateCleanEnergyForIntervals(intervals);
+            double avg = calculateCleanEnergyForIntervals(window);
 
-            if(avg > maxCleanEnergy){
+            if (avg > maxCleanEnergy) {
                 maxCleanEnergy = avg;
-                bestFrom = intervals.getFirst().getFrom();
-                bestTo = intervals.getLast().getTo();
-            }
-
-            if (i < generationForTwoDays.size()) {
-                intervals.removeFirst();
-                intervals.add(generationForTwoDays.get(i));
+                bestFrom = window.getFirst().getFrom();
+                bestTo = window.getLast().getTo();
             }
         }
+
         OptimalWindowDto result = new OptimalWindowDto();
-        result.setTo(bestTo);
         result.setFrom(bestFrom);
+        result.setTo(bestTo);
         result.setCleanEnergy(maxCleanEnergy);
 
         return result;

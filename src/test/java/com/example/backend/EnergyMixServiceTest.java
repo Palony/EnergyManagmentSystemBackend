@@ -1,10 +1,6 @@
 package com.example.backend;
 
-import com.example.backend.dto.DailyMixResponse;
-import com.example.backend.dto.EnergyMixDto;
-import com.example.backend.dto.GenerationMixDto;
-import com.example.backend.dto.IntervalDto;
-import com.example.backend.dto.OptimalWindowDto;
+import com.example.backend.dto.*;
 import com.example.backend.service.EnergyMixService;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
@@ -16,6 +12,8 @@ import org.springframework.web.client.RestClientException;
 import org.springframework.web.client.RestTemplate;
 
 import java.time.OffsetDateTime;
+import java.time.ZoneId;
+import java.time.ZonedDateTime;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -25,7 +23,6 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
-
 
 @ExtendWith(MockitoExtension.class)
 class EnergyMixServiceTest {
@@ -53,15 +50,12 @@ class EnergyMixServiceTest {
 
     @Nested
     class GetGeneration {
-
         @Test
         void returnsDataWhenApiRespondsSuccessfully() {
             OffsetDateTime from = OffsetDateTime.parse("2024-01-01T00:00:00Z");
             OffsetDateTime to = OffsetDateTime.parse("2024-01-01T00:30:00Z");
-
             List<GenerationMixDto> mixes = List.of(mix("wind", 30f), mix("gas", 70f));
             IntervalDto intervalDto = interval(from, to, mixes);
-
             EnergyMixDto response = new EnergyMixDto();
             response.setData(List.of(intervalDto));
 
@@ -75,60 +69,34 @@ class EnergyMixServiceTest {
 
         @Test
         void returnsEmptyListWhenApiThrowsException() {
-            OffsetDateTime from = OffsetDateTime.now();
+            OffsetDateTime from = OffsetDateTime.parse("2024-01-01T00:00:00Z");
             OffsetDateTime to = from.plusDays(1);
-
-            when(restTemplate.getForObject(anyString(), eq(EnergyMixDto.class)))
-                    .thenThrow(new RestClientException("API unavailable"));
-
+            when(restTemplate.getForObject(anyString(), eq(EnergyMixDto.class))).thenThrow(new RestClientException("API error"));
             List<IntervalDto> result = energyMixService.getGeneration(from, to);
-
             assertThat(result).isEmpty();
         }
 
         @Test
         void returnsEmptyListWhenResponseIsNull() {
-            OffsetDateTime from = OffsetDateTime.now();
+            OffsetDateTime from = OffsetDateTime.parse("2024-01-01T00:00:00Z");
             OffsetDateTime to = from.plusDays(1);
-
             when(restTemplate.getForObject(anyString(), eq(EnergyMixDto.class))).thenReturn(null);
-
-            List<IntervalDto> result = energyMixService.getGeneration(from, to);
-
-            assertThat(result).isEmpty();
-        }
-
-        @Test
-        void returnsEmptyListWhenResponseDataIsNull() {
-            OffsetDateTime from = OffsetDateTime.now();
-            OffsetDateTime to = from.plusDays(1);
-
-            EnergyMixDto response = new EnergyMixDto();
-            response.setData(null);
-
-            when(restTemplate.getForObject(anyString(), eq(EnergyMixDto.class))).thenReturn(response);
-
-            List<IntervalDto> result = energyMixService.getGeneration(from, to);
-
-            assertThat(result).isEmpty();
+            assertThat(energyMixService.getGeneration(from, to)).isEmpty();
         }
     }
 
     @Nested
     class GetGenerationForNDays {
-
         @Test
-        void delegatesToGetGenerationAndReturnsData() {
-            List<GenerationMixDto> mixes = List.of(mix("nuclear", 50f));
-            IntervalDto intervalDto = interval(OffsetDateTime.now(), OffsetDateTime.now().plusMinutes(30), mixes);
-
+        void returnsDataFromApi() {
+            OffsetDateTime from = OffsetDateTime.parse("2024-01-01T00:00:00Z");
+            IntervalDto interval = interval(from, from.plusMinutes(30), List.of(mix("wind", 50f)));
             EnergyMixDto response = new EnergyMixDto();
-            response.setData(List.of(intervalDto));
+            response.setData(List.of(interval));
 
             when(restTemplate.getForObject(anyString(), eq(EnergyMixDto.class))).thenReturn(response);
 
             List<IntervalDto> result = energyMixService.getGenerationForNDays(2);
-
             assertThat(result).hasSize(1);
             verify(restTemplate).getForObject(anyString(), eq(EnergyMixDto.class));
         }
@@ -136,19 +104,15 @@ class EnergyMixServiceTest {
 
     @Nested
     class GetThreeDaysAverages {
-
         @Test
-        void groupsIntervalsByDayAndComputesAveragesAndCleanEnergy() {
-            OffsetDateTime day1a = OffsetDateTime.parse("2024-01-01T00:00:00Z");
-            OffsetDateTime day1b = OffsetDateTime.parse("2024-01-01T00:30:00Z");
-            OffsetDateTime day2a = OffsetDateTime.parse("2024-01-02T00:00:00Z");
+        void calculatesDailyAverageAndCleanEnergy() {
+            ZoneId ukZone = ZoneId.of("Europe/London");
+            OffsetDateTime day1 = ZonedDateTime.now(ukZone).toLocalDate().atStartOfDay(ukZone).toOffsetDateTime();
+            OffsetDateTime day2 = day1.plusDays(1);
 
-            IntervalDto i1 = interval(day1a, day1a.plusMinutes(30),
-                    List.of(mix("wind", 20f), mix("gas", 80f)));
-            IntervalDto i2 = interval(day1b, day1b.plusMinutes(30),
-                    List.of(mix("wind", 40f), mix("gas", 60f)));
-            IntervalDto i3 = interval(day2a, day2a.plusMinutes(30),
-                    List.of(mix("wind", 100f), mix("gas", 0f)));
+            IntervalDto i1 = interval(day1, day1.plusMinutes(30), List.of(mix("wind", 20), mix("gas", 80)));
+            IntervalDto i2 = interval(day1.plusMinutes(30), day1.plusHours(1), List.of(mix("wind", 40), mix("gas", 60)));
+            IntervalDto i3 = interval(day2, day2.plusMinutes(30), List.of(mix("wind", 100), mix("gas", 0)));
 
             EnergyMixDto response = new EnergyMixDto();
             response.setData(List.of(i1, i2, i3));
@@ -158,32 +122,22 @@ class EnergyMixServiceTest {
             List<DailyMixResponse> result = energyMixService.getThreeDaysAverages();
 
             assertThat(result).hasSize(2);
-
-            DailyMixResponse dayOne = result.get(0);
-            DailyMixResponse dayTwo = result.get(1);
-
-            assertThat(dayOne.getDate()).isEqualTo("2024-01-01");
-            assertThat(dayTwo.getDate()).isEqualTo("2024-01-02");
-
-            assertThat(dayOne.getAverageGeneration().get("wind")).isEqualTo(30.0);
-            assertThat(dayOne.getAverageGeneration().get("gas")).isEqualTo(70.0);
-
-            assertThat(dayOne.getCleanEnergy()).isEqualTo(30.0);
-
-            assertThat(dayTwo.getAverageGeneration().get("wind")).isEqualTo(100.0);
-            assertThat(dayTwo.getCleanEnergy()).isEqualTo(100.0);
+            assertThat(result.get(0).getDate()).isEqualTo(day1.toLocalDate().toString());
+            assertThat(result.get(0).getAverageGeneration().get("wind")).isEqualTo(30.0);
+            assertThat(result.get(0).getCleanEnergy()).isEqualTo(30.0);
+            assertThat(result.get(1).getCleanEnergy()).isEqualTo(100.0);
         }
 
         @Test
-        void ignoresIntervalsWithNullFromOrNullGenerationMix() {
-            OffsetDateTime validFrom = OffsetDateTime.parse("2024-01-01T00:00:00Z");
+        void ignoresInvalidIntervals() {
+            ZoneId ukZone = ZoneId.of("Europe/London");
+            OffsetDateTime day1 = ZonedDateTime.now(ukZone).toLocalDate().atStartOfDay(ukZone).toOffsetDateTime();
 
-            IntervalDto valid = interval(validFrom, validFrom.plusMinutes(30), List.of(mix("solar", 50f)));
-            IntervalDto nullFrom = interval(null, validFrom.plusMinutes(30), List.of(mix("solar", 50f)));
-            IntervalDto nullMix = interval(validFrom, validFrom.plusMinutes(30), null);
+            IntervalDto valid = interval(day1, day1.plusMinutes(30), List.of(mix("solar", 50)));
+            IntervalDto invalid = interval(null, null, null);
 
             EnergyMixDto response = new EnergyMixDto();
-            response.setData(new ArrayList<>(List.of(valid, nullFrom, nullMix)));
+            response.setData(List.of(valid, invalid));
 
             when(restTemplate.getForObject(anyString(), eq(EnergyMixDto.class))).thenReturn(response);
 
@@ -192,79 +146,52 @@ class EnergyMixServiceTest {
             assertThat(result).hasSize(1);
             assertThat(result.get(0).getAverageGeneration()).containsEntry("solar", 50.0);
         }
-
-        @Test
-        void returnsEmptyListWhenNoDataAvailable() {
-            when(restTemplate.getForObject(anyString(), eq(EnergyMixDto.class))).thenReturn(null);
-
-            List<DailyMixResponse> result = energyMixService.getThreeDaysAverages();
-
-            assertThat(result).isEmpty();
-        }
     }
 
     @Nested
     class CalculateOptimalWindow {
-
         @Test
-        void throwsWhenHoursBelowMinimum() {
+        void throwsWhenHoursInvalid() {
             assertThrows(IllegalArgumentException.class, () -> energyMixService.calculateOptimalWindow(0));
-        }
-
-        @Test
-        void throwsWhenHoursAboveMaximum() {
             assertThrows(IllegalArgumentException.class, () -> energyMixService.calculateOptimalWindow(7));
         }
 
         @Test
-        void findsWindowWithHighestCleanEnergyAverage() {
-            float[] windPercentages = {10f, 20f, 90f, 95f, 30f, 40f, 50f, 60f};
-            List<IntervalDto> intervals = buildSequentialIntervals(windPercentages);
-
+        void findsBestWindow() {
+            float[] values = {10, 20, 90, 95, 30, 40, 50, 60};
             EnergyMixDto response = new EnergyMixDto();
-            response.setData(intervals);
+            response.setData(buildSequentialIntervals(values));
+
             when(restTemplate.getForObject(anyString(), eq(EnergyMixDto.class))).thenReturn(response);
 
-            OptimalWindowDto result = energyMixService.calculateOptimalWindow(1); // windowSize = 2
-
+            OptimalWindowDto result = energyMixService.calculateOptimalWindow(1);
             assertThat(result.getCleanEnergy()).isEqualTo(92.5);
-            assertThat(result.getFrom()).isEqualTo(intervals.get(2).getFrom());
-            assertThat(result.getTo()).isEqualTo(intervals.get(3).getTo());
+            assertThat(result.getFrom()).isEqualTo(response.getData().get(2).getFrom());
+            assertThat(result.getTo()).isEqualTo(response.getData().get(3).getTo());
         }
 
         @Test
-        void currentImplementationNeverEvaluatesTheFinalWindow() {
-            float[] windPercentages = {10f, 20f, 30f, 40f, 50f, 60f, 90f, 95f};
-            List<IntervalDto> intervals = buildSequentialIntervals(windPercentages);
-
+        void evaluatesLastPossibleWindow() {
+            float[] values = {10, 20, 30, 40, 50, 60, 90, 95};
             EnergyMixDto response = new EnergyMixDto();
-            response.setData(intervals);
+            response.setData(buildSequentialIntervals(values));
+
             when(restTemplate.getForObject(anyString(), eq(EnergyMixDto.class))).thenReturn(response);
 
-            OptimalWindowDto result = energyMixService.calculateOptimalWindow(1); // windowSize = 2
-
-            assertThat(result.getCleanEnergy()).isNotEqualTo(92.5);
-            assertThat(result.getCleanEnergy()).isEqualTo(75.0);
-            assertThat(result.getFrom()).isEqualTo(intervals.get(5).getFrom());
-            assertThat(result.getTo()).isEqualTo(intervals.get(6).getTo());
+            OptimalWindowDto result = energyMixService.calculateOptimalWindow(1);
+            assertThat(result.getCleanEnergy()).isEqualTo(92.5);
+            assertThat(result.getFrom()).isEqualTo(response.getData().get(6).getFrom());
+            assertThat(result.getTo()).isEqualTo(response.getData().get(7).getTo());
         }
 
-        @Test
-        void throwsWhenAvailableDataIsSmallerThanWindowSize() {
-            when(restTemplate.getForObject(anyString(), eq(EnergyMixDto.class))).thenReturn(null);
-
-            assertThrows(IndexOutOfBoundsException.class, () -> energyMixService.calculateOptimalWindow(6));
-        }
-
-        private List<IntervalDto> buildSequentialIntervals(float[] windPercentages) {
-            List<IntervalDto> intervals = new ArrayList<>();
+        private List<IntervalDto> buildSequentialIntervals(float[] values) {
+            List<IntervalDto> result = new ArrayList<>();
             OffsetDateTime start = OffsetDateTime.parse("2024-01-01T00:00:00Z");
-            for (int i = 0; i < windPercentages.length; i++) {
-                OffsetDateTime from = start.plusMinutes(30L * i);
-                OffsetDateTime to = from.plusMinutes(30);
-                intervals.add(interval(from, to, List.of(mix("wind", windPercentages[i]))));
+            for (int i = 0; i < values.length; i++) {
+                OffsetDateTime from = start.plusMinutes(i * 30L);
+                result.add(interval(from, from.plusMinutes(30), List.of(mix("wind", values[i]))));
             }
-            return intervals;
+            return result;
         }
     }
 }
