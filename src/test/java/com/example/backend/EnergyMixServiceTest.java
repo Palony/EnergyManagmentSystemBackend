@@ -1,5 +1,6 @@
 package com.example.backend;
 
+import com.example.backend.client.EnergyMixClient;
 import com.example.backend.dto.*;
 import com.example.backend.service.EnergyMixService;
 import org.junit.jupiter.api.Nested;
@@ -24,6 +25,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+
 @ExtendWith(MockitoExtension.class)
 class EnergyMixServiceTest {
 
@@ -32,6 +34,8 @@ class EnergyMixServiceTest {
 
     @InjectMocks
     private EnergyMixService energyMixService;
+
+    private EnergyMixClient energyMixClient;
 
     private GenerationMixDto mix(String fuel, float perc) {
         GenerationMixDto dto = new GenerationMixDto();
@@ -61,7 +65,7 @@ class EnergyMixServiceTest {
 
             when(restTemplate.getForObject(anyString(), eq(EnergyMixDto.class))).thenReturn(response);
 
-            List<IntervalDto> result = energyMixService.getGeneration(from, to);
+            List<IntervalDto> result = energyMixClient.getGeneration(from, to);
 
             assertThat(result).hasSize(1);
             assertThat(result.get(0).getGenerationmix()).containsExactlyElementsOf(mixes);
@@ -72,7 +76,7 @@ class EnergyMixServiceTest {
             OffsetDateTime from = OffsetDateTime.parse("2024-01-01T00:00:00Z");
             OffsetDateTime to = from.plusDays(1);
             when(restTemplate.getForObject(anyString(), eq(EnergyMixDto.class))).thenThrow(new RestClientException("API error"));
-            List<IntervalDto> result = energyMixService.getGeneration(from, to);
+            List<IntervalDto> result = energyMixClient.getGeneration(from, to);
             assertThat(result).isEmpty();
         }
 
@@ -81,7 +85,7 @@ class EnergyMixServiceTest {
             OffsetDateTime from = OffsetDateTime.parse("2024-01-01T00:00:00Z");
             OffsetDateTime to = from.plusDays(1);
             when(restTemplate.getForObject(anyString(), eq(EnergyMixDto.class))).thenReturn(null);
-            assertThat(energyMixService.getGeneration(from, to)).isEmpty();
+            assertThat(energyMixClient.getGeneration(from, to)).isEmpty();
         }
     }
 
